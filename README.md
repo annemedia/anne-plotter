@@ -6,7 +6,6 @@
 - direct and async i/o
 - SIMD support: sse2, avx, avx2, avx512f
 - gpu support
-- fastest plotter there is
 
 ## Binary files
 
