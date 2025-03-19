@@ -1,4 +1,4 @@
-# signum-plotter
+# ANNE Plotter
 
 ## Features
 - windows, linux, unix & macOS
@@ -8,16 +8,16 @@
 - gpu support
 - fastest plotter there is
 
-## Binary files and source code releases
+## Binary files
 
-https://github.com/signum-network/signum-plotter/releases
+https://github.com/annemedia/anne-plotter/releases
 
 ## Running the binaries
 
 This is a command line tool, download the executable for your system and run it in a command prompt:
 
 ```shell
-./signum-plotter --help
+./anne-plotter --help
 ```
 
 ## Build from Sources
