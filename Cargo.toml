@@ -1,6 +1,6 @@
 [package]
 name = "anne-plotter"
-version = "1.0.0"
+version = "2.0.0"
 license = "GPL-3.0"
 authors = ["annemedia, forked from Signum Network"]
 description = """
@@ -17,20 +17,20 @@ opencl = ["ocl-core"]
 simd=[]
 
 [dependencies]
-crossbeam-channel = "0.3.6"
+crossbeam-channel = "0.5.15"
 ocl-core = { version = "0.11.1", optional = true } 
-clap = "2.32.0"
-raw-cpuid = "6.1.0"
-sys-info = "0.6.0"
-cfg-if = "0.1.6"
+clap = "2.34.0"
+raw-cpuid = "11.6.0"
+sys-info = "0.9.1"
+cfg-if = "1.0.4"
 pbr = "1.0.1"
 humanize-rs = "0.1.5"
 libc = "0.2.97"
 rayon = "1.0.3"
-core_affinity = "0.5.9"
+core_affinity = "0.8.3"
 stopwatch = "0.0.7"
 fs2 = "0.4.3"
-page_size = "0.4.1"
+page_size = "0.6.0"
 thread-priority = "3.0.0"
 
 [target.'cfg(windows)'.dependencies]
@@ -43,7 +43,6 @@ rustflags = [
     "-C", "link-args=-L/home/guru/win-libs/opencl/x64",
     "-C", "link-args=-lOpenCL",
 ]
-
 
 [build-dependencies]
 cc = "1.0"

@@ -48,11 +48,19 @@ impl Plotter {
 
     pub fn run(self, mut task: PlotterTask) {
         let cpuid = CpuId::new();
-        let cpu_name = cpuid.get_extended_function_info().unwrap();
-        let cpu_name = cpu_name.processor_brand_string().unwrap().trim();
+        let cpu_name = cpuid
+            .get_processor_brand_string()
+            .map(|s| s.as_str().trim().to_string())  // Changed: use .as_str() first
+            .unwrap_or_else(|| {
+                cpuid
+                    .get_vendor_info()
+                    .map(|v| v.as_str().to_string())
+                    .unwrap_or_else(|| "Unknown CPU".to_string())
+            });
+        
         let cores = sys_info::cpu_num().unwrap();
         let memory = sys_info::mem_info().unwrap();
-
+        
         let simd_ext = init_simd();
 
         if !task.quiet {
