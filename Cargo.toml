@@ -1,16 +1,16 @@
 [package]
-name = "signum-plotter"
-version = "2.6.0"
+name = "anne-plotter"
+version = "1.0.0"
 license = "GPL-3.0"
-authors = ["jjos2372, forked from PoC Consortium"]
+authors = ["annemedia, forked from Signum Network"]
 description = """
-signum-plotter - a PoC2 plotter written in Rust
+anne-plotter - a PoC2 plotter written in Rust
 """
-repository = "https://github.com/signum-network/signum-plotter"
-documentation = "https://github.com/signum-network/signum-plotter"
-keywords = ["signum", "plotter", "rust", "cryptocurrency"]
+repository = "https://github.com/annemedia/anne-plotter"
+documentation = "https://github.com/annemedia/anne-plotter"
+keywords = ["anne", "plotter", "rust", "datacurrency"]
 readme = "README.md"
-edition = "2018"
+edition = "2024"
 
 [features]
 opencl = ["ocl-core"]
@@ -31,13 +31,19 @@ core_affinity = "0.5.9"
 stopwatch = "0.0.7"
 fs2 = "0.4.3"
 page_size = "0.4.1"
-aligned_alloc = "0.1.3"
-
-[target.'cfg(linux)'.dependencies]
-thread-priority = "0.1.0"
+thread-priority = "3.0.0"
 
 [target.'cfg(windows)'.dependencies]
-winapi = { version = "0.3", features = ["std","fileapi","securitybaseapi"] }
+winapi = { version = "0.3", features = ["std","fileapi","securitybaseapi","errhandlingapi"] }
+
+[target.x86_64-pc-windows-gnu]
+linker = "x86_64-w64-mingw32-gcc"
+ar = "x86_64-w64-mingw32-ar"
+rustflags = [
+    "-C", "link-args=-L/home/guru/win-libs/opencl/x64",
+    "-C", "link-args=-lOpenCL",
+]
+
 
 [build-dependencies]
 cc = "1.0"

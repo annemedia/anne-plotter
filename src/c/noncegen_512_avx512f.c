@@ -5,9 +5,9 @@
 #include "mshabal_512_avx512f.h"
 #include "sph_shabal.h"
 
-sph_shabal_context global_32;
-mshabal512_context global_512;
-mshabal512_context_fast global_512_fast;
+static sph_shabal_context global_32;
+static mshabal512_context global_512;
+static mshabal512_context_fast global_512_fast;
 
 void init_shabal_avx512f() {
     sph_shabal256_init(&global_32);
@@ -23,7 +23,7 @@ void init_shabal_avx512f() {
 // numeric_id:		numeric account id
 // loc_startnonce	nonce to start generation at
 // local_nonces: 	number of nonces to generate
-void noncegen_avx512(char *cache, const size_t cache_size, const size_t chunk_offset,
+void noncegen_avx512f(char *cache, const size_t cache_size, const size_t chunk_offset,
                    const uint64_t numeric_id, const uint64_t local_startnonce,
                    const uint64_t local_nonces) {
     sph_shabal_context local_32;

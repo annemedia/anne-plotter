@@ -4,27 +4,21 @@ use std::path::Path;
 
 cfg_if! {
     if #[cfg(unix)] {
-        #[cfg(linux)]
+        #[cfg(target_os = "linux")]
         extern crate thread_priority;
         use std::process::Command;
         use std::process;
         use std::os::unix::fs::OpenOptionsExt;
         use fs2::FileExt;
-        #[cfg(linux)]
+        #[cfg(target_os = "linux")]
         use thread_priority::*;
 
         const O_DIRECT: i32 = 0o0_040_000;
 
         pub fn set_low_prio() {
             // todo: low prio for macos
-            #[cfg(linux)]
-            let thread_id = thread_native_id();
-            #[cfg(linux)]
-            set_thread_priority(
-                thread_id,
-                ThreadPriority::Min,
-                ThreadSchedulePolicy::Normal(NormalThreadSchedulePolicy::Normal)
-            ).unwrap();
+            #[cfg(target_os = "linux")]
+            set_current_thread_priority(ThreadPriority::Min).unwrap();
         }
 
         pub fn open_using_direct_io<P: AsRef<Path>>(path: P) -> io::Result<File> {
@@ -286,5 +280,3 @@ cfg_if! {
         }
     }
 }
-
-

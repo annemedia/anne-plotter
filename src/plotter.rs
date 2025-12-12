@@ -56,7 +56,7 @@ impl Plotter {
         let simd_ext = init_simd();
 
         if !task.quiet {
-            println!("signum-plotter {}\n", crate_version!());
+            println!("anne-plotter {}\n", crate_version!());
         }
 
         if !task.quiet && task.benchmark {

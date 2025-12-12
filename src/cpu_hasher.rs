@@ -7,7 +7,7 @@ const NUM_SCOOPS: usize = 4096;
 const SCOOP_SIZE: usize = 64;
 const NONCE_SIZE: usize = NUM_SCOOPS * SCOOP_SIZE;
 
-extern "C" {
+unsafe extern "C" {
     pub fn init_shabal_sse2() -> ();
     pub fn init_shabal_avx() -> ();
     pub fn init_shabal_avx2() -> ();
@@ -36,7 +36,7 @@ extern "C" {
         local_startnonce: u64,
         local_nonces: u64,
     );
-    pub fn noncegen_avx512(
+    pub fn noncegen_avx512f(
         cache: *mut c_void,
         cache_size: size_t,
         chunk_offset: size_t,
@@ -45,6 +45,7 @@ extern "C" {
         local_nonces: u64,
     );
 }
+
 pub struct SafePointer {
     pub ptr: *mut u8,
 }
@@ -59,6 +60,9 @@ pub struct CpuTask {
     pub local_startnonce: u64,
     pub local_nonces: u64,
 }
+
+unsafe impl Send for CpuTask {}
+unsafe impl Sync for CpuTask {}
 
 #[derive(Debug, Clone)]
 pub enum SimdExtension {
@@ -99,53 +103,64 @@ pub fn hash_cpu(
     tx: Sender<(u8, u8, u64)>,
     hasher_task: CpuTask,
     simd_ext: SimdExtension,
-) -> impl FnOnce() {
+) -> impl FnOnce() + Send + 'static {
+    // Convert raw pointer to usize which implements Send
+    let cache_ptr_as_usize = hasher_task.cache.ptr as usize;
+    let cache_size = hasher_task.cache_size;
+    let chunk_offset = hasher_task.chunk_offset;
+    let numeric_id = hasher_task.numeric_id;
+    let local_startnonce = hasher_task.local_startnonce;
+    let local_nonces = hasher_task.local_nonces;
+    
     move || {
+        // Convert back from usize to raw pointer
+        let cache_ptr = cache_ptr_as_usize as *mut u8;
+        
         unsafe {
             match simd_ext {
-                SimdExtension::AVX512f => noncegen_avx512(
-                    hasher_task.cache.ptr as *mut c_void,
-                    hasher_task.cache_size,
-                    hasher_task.chunk_offset,
-                    hasher_task.numeric_id,
-                    hasher_task.local_startnonce,
-                    hasher_task.local_nonces,
+                SimdExtension::AVX512f => noncegen_avx512f(
+                    cache_ptr as *mut c_void,
+                    cache_size,
+                    chunk_offset,
+                    numeric_id,
+                    local_startnonce,
+                    local_nonces,
                 ),
                 SimdExtension::AVX2 => noncegen_avx2(
-                    hasher_task.cache.ptr as *mut c_void,
-                    hasher_task.cache_size,
-                    hasher_task.chunk_offset,
-                    hasher_task.numeric_id,
-                    hasher_task.local_startnonce,
-                    hasher_task.local_nonces,
+                    cache_ptr as *mut c_void,
+                    cache_size,
+                    chunk_offset,
+                    numeric_id,
+                    local_startnonce,
+                    local_nonces,
                 ),
                 SimdExtension::AVX => noncegen_avx(
-                    hasher_task.cache.ptr as *mut c_void,
-                    hasher_task.cache_size,
-                    hasher_task.chunk_offset,
-                    hasher_task.numeric_id,
-                    hasher_task.local_startnonce,
-                    hasher_task.local_nonces,
+                    cache_ptr as *mut c_void,
+                    cache_size,
+                    chunk_offset,
+                    numeric_id,
+                    local_startnonce,
+                    local_nonces,
                 ),
                 SimdExtension::SSE2 => noncegen_sse2(
-                    hasher_task.cache.ptr as *mut c_void,
-                    hasher_task.cache_size,
-                    hasher_task.chunk_offset,
-                    hasher_task.numeric_id,
-                    hasher_task.local_startnonce,
-                    hasher_task.local_nonces,
+                    cache_ptr as *mut c_void,
+                    cache_size,
+                    chunk_offset,
+                    numeric_id,
+                    local_startnonce,
+                    local_nonces,
                 ),
                 _ => {
                     let data = from_raw_parts_mut(
-                        hasher_task.cache.ptr,
-                        hasher_task.cache_size * NONCE_SIZE,
+                        cache_ptr,
+                        cache_size * NONCE_SIZE,
                     );
                     noncegen_rust(
                         data,
-                        hasher_task.chunk_offset,
-                        hasher_task.numeric_id,
-                        hasher_task.local_startnonce,
-                        hasher_task.local_nonces,
+                        chunk_offset,
+                        numeric_id,
+                        local_startnonce,
+                        local_nonces,
                     )
                 }
             }
@@ -154,7 +169,7 @@ pub fn hash_cpu(
         tx.send((0u8, 1u8, 0))
             .expect("CPU task can't communicate with scheduler thread.");
         // report data in hostmem
-        tx.send((0u8, 0u8, hasher_task.local_nonces))
+        tx.send((0u8, 0u8, local_nonces))
             .expect("CPU task can't communicate with scheduler thread.");
     }
 }
@@ -183,7 +198,7 @@ mod test {
             let mut buf = vec![0; 32 * plotter::NONCE_SIZE as usize];
             unsafe {
                 init_shabal_avx512f();
-                noncegen_avx512(
+                noncegen_avx512f(
                     buf.as_mut_ptr() as *mut c_void,
                     32,
                     0,

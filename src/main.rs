@@ -25,7 +25,7 @@ use clap::{App, Arg};
 use std::cmp::min;
 
 fn main() {
-    let arg = App::new("signum-plotter")
+    let arg = App::new("anne-plotter")
         .version(crate_version!())
         .author(crate_authors!())
         .about(crate_description!())
