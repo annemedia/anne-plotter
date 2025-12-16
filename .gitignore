@@ -13,3 +13,4 @@
 *.bat
 *.exe
 Cargo.lock*
+Cargo copy.toml
