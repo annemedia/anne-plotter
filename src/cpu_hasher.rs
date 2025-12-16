@@ -74,29 +74,23 @@ pub enum SimdExtension {
 }
 
 pub fn init_simd() -> SimdExtension {
-    if is_x86_feature_detected!("avx512f") {
-        unsafe {
-            init_shabal_avx512f();
+    #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+    {
+        if is_x86_feature_detected!("avx512f") {
+            unsafe { init_shabal_avx512f(); }
+            return SimdExtension::AVX512f;
+        } else if is_x86_feature_detected!("avx2") {
+            unsafe { init_shabal_avx2(); }
+            return SimdExtension::AVX2;
+        } else if is_x86_feature_detected!("avx") {
+            unsafe { init_shabal_avx(); }
+            return SimdExtension::AVX;
+        } else if is_x86_feature_detected!("sse2") {
+            unsafe { init_shabal_sse2(); }
+            return SimdExtension::SSE2;
         }
-        SimdExtension::AVX512f
-    } else if is_x86_feature_detected!("avx2") {
-        unsafe {
-            init_shabal_avx2();
-        }
-        SimdExtension::AVX2
-    } else if is_x86_feature_detected!("avx") {
-        unsafe {
-            init_shabal_avx();
-        }
-        SimdExtension::AVX
-    } else if is_x86_feature_detected!("sse2") {
-        unsafe {
-            init_shabal_sse2();
-        }
-        SimdExtension::SSE2
-    } else {
-        SimdExtension::None
     }
+    SimdExtension::None
 }
 
 pub fn hash_cpu(
