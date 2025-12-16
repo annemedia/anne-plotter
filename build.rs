@@ -1,6 +1,12 @@
 extern crate cc;
 
+use std::env;
+
 fn main() {
+    let target_arch = env::var("TARGET").unwrap();
+
+    let is_x86_64 = target_arch.contains("x86_64");
+
     let mut shared_config = cc::Build::new();
 
     #[cfg(target_env = "msvc")]
@@ -22,52 +28,64 @@ fn main() {
         .file("src/c/common.c")
         .compile("shabal");
 
-    let mut config = shared_config.clone();
+    // SSE2 variant — only on x86_64
+    if is_x86_64 {
+        let mut config = shared_config.clone();
 
-    #[cfg(not(target_env = "msvc"))]
-    config.flag("-msse2");
+        #[cfg(not(target_env = "msvc"))]
+        config.flag("-msse2");
 
-    config
-        .file("src/c/mshabal_128_sse2.c")
-        .file("src/c/noncegen_128_sse2.c")
-        .compile("shabal_sse2");
+        config
+            .file("src/c/mshabal_128_sse2.c")
+            .file("src/c/noncegen_128_sse2.c")
+            .compile("shabal_sse2");
+    }
 
-    let mut config = shared_config.clone();
+    // AVX2 variant — only on x86_64
+    if is_x86_64 {
+        let mut config = shared_config.clone();
 
-    #[cfg(target_env = "msvc")]
-    config.flag("/arch:AVX2");
+        if cfg!(target_env = "msvc") {
+            config.flag("/arch:AVX2");
+        } else {
+            config.flag("-mavx2");
+        }
 
-    #[cfg(not(target_env = "msvc"))]
-    config.flag("-mavx2");
+        config
+            .file("src/c/mshabal_256_avx2.c")
+            .file("src/c/noncegen_256_avx2.c")
+            .compile("shabal_avx2");
+    }
 
-    config
-        .file("src/c/mshabal_256_avx2.c")
-        .file("src/c/noncegen_256_avx2.c")
-        .compile("shabal_avx2");
+    // AVX variant — only on x86_64
+    if is_x86_64 {
+        let mut config = shared_config.clone();
 
-    let mut config = shared_config.clone();
+        if cfg!(target_env = "msvc") {
+            config.flag("/arch:AVX");
+        } else {
+            config.flag("-mavx");
+        }
 
-    #[cfg(target_env = "msvc")]
-    config.flag("/arch:AVX");
+        config
+            .file("src/c/mshabal_128_avx.c")
+            .file("src/c/noncegen_128_avx.c")
+            .compile("shabal_avx");
+    }
 
-    #[cfg(not(target_env = "msvc"))]
-    config.flag("-mavx");
+    // AVX512 variant — only on x86_64
+    if is_x86_64 {
+        let mut config = shared_config.clone();
 
-    config
-        .file("src/c/mshabal_128_avx.c")
-        .file("src/c/noncegen_128_avx.c")
-        .compile("shabal_avx");
+        if cfg!(target_env = "msvc") {
+            config.flag("/arch:AVX512");
+        } else {
+            config.flag("-mavx512f");
+        }
 
-    let mut config = shared_config.clone();
-
-    #[cfg(target_env = "msvc")]
-    config.flag("/arch:AVX512");
-
-    #[cfg(not(target_env = "msvc"))]
-    config.flag("-mavx512f");
-
-    config
-        .file("src/c/mshabal_512_avx512f.c")
-        .file("src/c/noncegen_512_avx512f.c")
-        .compile("shabal_avx512");
+        config
+            .file("src/c/mshabal_512_avx512f.c")
+            .file("src/c/noncegen_512_avx512f.c")
+            .compile("shabal_avx512");
+    }
 }
