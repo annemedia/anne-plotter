@@ -19,11 +19,12 @@ simd=[]
 [dependencies]
 crossbeam-channel = "0.5.15"
 ocl-core = { version = "0.11.1", optional = true } 
-clap = "2.34.0"
+clap = "4.5.53"
 raw-cpuid = "11.6.0"
 sys-info = "0.9.1"
 cfg-if = "1.0.4"
-pbr = "1.0.1"
+#pbr = "1.1.1"
+indicatif = { version = "0.18.3", features = ["rayon"] }
 humanize-rs = "0.1.5"
 libc = "0.2.97"
 rayon = "1.0.3"

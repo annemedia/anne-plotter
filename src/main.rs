@@ -1,8 +1,3 @@
-#[macro_use]
-extern crate clap;
-#[macro_use]
-extern crate cfg_if;
-
 mod cpu_hasher;
 #[cfg(feature = "opencl")]
 mod gpu_hasher;
@@ -16,243 +11,316 @@ mod utils;
 mod writer;
 mod buffer;
 
+use std::cmp::min;
+use std::process;
+
+use clap::{Arg, ArgAction, ArgGroup, Command};
 use crate::plotter::{Plotter, PlotterTask};
 use crate::utils::set_low_prio;
-use clap::AppSettings::{ArgRequiredElseHelp, DeriveDisplayOrder, VersionlessSubcommands};
-#[cfg(feature = "opencl")]
-use clap::ArgGroup;
-use clap::{App, Arg};
-use std::cmp::min;
 
 fn main() {
-    let arg = App::new("anne-plotter")
-        .version(crate_version!())
-        .author(crate_authors!())
-        .about(crate_description!())
-        /*
-        .setting(SubcommandRequiredElseHelp)
-        */
-        .setting(ArgRequiredElseHelp)
-        .setting(DeriveDisplayOrder)
-        .setting(VersionlessSubcommands)
+    let mut cmd = Command::new("anne-plotter")
+        .version(env!("CARGO_PKG_VERSION"))
+        .author(env!("CARGO_PKG_AUTHORS"))
+        .about(env!("CARGO_PKG_DESCRIPTION"))
+        .arg_required_else_help(true)
+        // Removed display_order_derive — clap 4 handles ordering well by default
         .arg(
-            Arg::with_name("disable direct i/o")
-                .short("d")
+            Arg::new("disable_direct_io")
+                .short('d')
                 .long("ddio")
                 .help("Disables direct i/o")
+                .action(ArgAction::SetTrue)
                 .global(true),
-        ).arg(
-            Arg::with_name("disable async i/o")
-                .short("a")
+        )
+        .arg(
+            Arg::new("disable_async_io")
+                .short('a')
                 .long("daio")
                 .help("Disables async writing (single RAM buffer mode)")
+                .action(ArgAction::SetTrue)
                 .global(true),
-        ).arg(
-            Arg::with_name("low priority")
-                .short("l")
+        )
+        .arg(
+            Arg::new("low_priority")
+                .short('l')
                 .long("prio")
                 .help("Runs with low priority")
+                .action(ArgAction::SetTrue)
                 .global(true),
-        ).arg(
-            Arg::with_name("non-verbosity")
-                .short("q")
+        )
+        .arg(
+            Arg::new("quiet")
+                .short('q')
                 .long("quiet")
                 .help("Runs in non-verbose mode")
+                .action(ArgAction::SetTrue)
                 .global(true),
-        ).arg(
-            Arg::with_name("benchmark")
-                .short("b")
+        )
+        .arg(
+            Arg::new("benchmark")
+                .short('b')
                 .long("bench")
                 .help("Runs in xPU benchmark mode")
+                .action(ArgAction::SetTrue)
                 .global(true),
         )
-        /*
-        .subcommand(
-            SubCommand::with_name("plot")
-                .about("Plots a PoC2 file for your account ID")
-                .setting(ArgRequiredElseHelp)
-                .setting(DeriveDisplayOrder)
-                */.arg(
-                    Arg::with_name("numeric id")
-                        .short("i")
-                        .long("id")
-                        .value_name("numeric_ID")
-                        .help("your numeric Account ID")
-                        .takes_value(true)
-                        .required_unless("ocl-devices"),
-                ).arg(
-                    Arg::with_name("start nonce")
-                        .short("s")
-                        .long("sn")
-                        .value_name("start_nonce")
-                        .help("where you want to start plotting")
-                        .takes_value(true)
-                        .required_unless("ocl-devices"),
-                ).arg(
-                    Arg::with_name("nonces")
-                        .short("n")
-                        .long("n")
-                        .value_name("nonces")
-                        .help("how many nonces you want to plot")
-                        .takes_value(true)
-                        .required_unless("ocl-devices"),
-                ).arg(
-                    Arg::with_name("path")
-                        .short("p")
-                        .long("path")
-                        .value_name("path")
-                        .help("target path for plotfile (optional)")
-                        .takes_value(true)
-                        .required(false),
-                ).arg(
-                    Arg::with_name("memory")
-                        .short("m")
-                        .long("mem")
-                        .value_name("memory")
-                        .help("maximum memory usage (optional)")
-                        .takes_value(true)
-                        .required(false),
-                ).args(&[
-                    Arg::with_name("cpu")
-                        .short("c")
-                        .long("cpu")
-                        .value_name("threads")
-                        .help("maximum cpu threads you want to use (optional)")
-                        .required(false)
-                        .takes_value(true),
-                    #[cfg(feature = "opencl")]
-                    Arg::with_name("gpu")
-                        .short("g")
-                        .long("gpu")
-                        .value_name("platform_id:device_id:cores")
-                        .help("GPU(s) you want to use for plotting (optional)")
-                        .multiple(true)
-                        .takes_value(true),
-                ]).groups(&[#[cfg(feature = "opencl")]
-                ArgGroup::with_name("processing")
-                    .args(&["cpu", "gpu"])
-                    .multiple(true)])
-                    /*
-                    .arg(
-                    Arg::with_name("ssd buffer")
-                        .short("b")
-                        .long("ssd_cache")
-                        .value_name("ssd_cache")
-                        .help("*path to ssd cache for staging (optional)")
-                        .takes_value(true)
-                        .required(false),
-                        
-                ),
-                
-        ).subcommand(
-            SubCommand::with_name("encode")
-                .about("*Individualizes a PoC3 reference file for your account ID")
-                .display_order(2)
-                .arg(
-                    Arg::with_name("numeric id")
-                        .short("i")
-                        .long("numeric_ID")
-                        .value_name("numeric ID")
-                        .help("numeric Account ID")
-                        .takes_value(true),
-                ),
-        ).subcommand(
-            SubCommand::with_name("decode")
-                .about("*Restores a PoC3 reference file from an individualized file")
-                .display_order(3)
-                .arg(
-                    Arg::with_name("numeric id")
-                        .short("i")
-                        .long("numeric_ID")
-                        .value_name("numeric ID")
-                        .help("numeric Account ID")
-                        .takes_value(true)
-                        .required(true),
-                ),
-                
-        )*/;
+        .arg(
+            Arg::new("numeric_id")
+                .short('i')
+                .long("id")
+                .value_name("NUMERIC_ID")
+                .help("Your numeric Account ID")
+                .value_parser(clap::value_parser!(u64))
+                .required_unless_present("ocl_devices"),
+        )
+        .arg(
+            Arg::new("start_nonce")
+                .short('s')
+                .long("sn")
+                .value_name("START_NONCE")
+                .help("Starting nonce for plotting")
+                .value_parser(clap::value_parser!(u64))
+                // Required unless either start_nonce_auto or ocl_devices is present
+                .required_unless_present("start_nonce_auto")
+                .required_unless_present("ocl_devices"),
+        )
+        .arg(
+            Arg::new("start_nonce_auto")
+                .short('A')
+                .long("sna")
+                .value_name("COUNT")
+                .help("Auto-plot COUNT (>=1) sequential files, each with --n nonces, starting after the last existing plot for this ID. Ignores --sn.")
+                .value_parser(clap::value_parser!(u64))
+                .conflicts_with("start_nonce"),
+        )
+        .arg(
+            Arg::new("nonces")
+                .short('n')
+                .long("n")
+                .value_name("NONCES")
+                .help("How many nonces you want to plot")
+                .value_parser(clap::value_parser!(u64))
+                .required_unless_present("ocl_devices"),
+        )
+        .arg(
+            Arg::new("path")
+                .short('p')
+                .long("path")
+                .value_name("PATH")
+                .help("Target path for plotfile (optional)"),
+        )
+        .arg(
+            Arg::new("memory")
+                .short('m')
+                .long("mem")
+                .value_name("MEMORY")
+                .help("Maximum memory usage (optional)")
+                .default_value("0B"),
+        )
+        .arg(
+            Arg::new("cpu")
+                .short('c')
+                .long("cpu")
+                .value_name("THREADS")
+                .help("Maximum cpu cores you want to use (optional)")
+                .value_parser(clap::value_parser!(u8)),
+        )
+        .arg(
+            Arg::new("gpu")
+                .short('g')
+                .long("gpu")
+                .value_name("platform_id:device_id:cores")
+                .help("GPU(s) you want to use for plotting (optional)")
+                .action(ArgAction::Append),
+        )
+        .group(
+            ArgGroup::new("processing")
+                .args(["cpu", "gpu"])
+                .multiple(true),
+        );
 
     #[cfg(feature = "opencl")]
-    let arg = arg
-        .arg(
-            Arg::with_name("ocl-devices")
-                .short("o")
-                .long("opencl")
-                .help("Display OpenCL platforms and devices")
-                .global(true),
-        )
-        .arg(
-            Arg::with_name("zero-copy")
-                .short("z")
-                .long("zcb")
-                .help("Enables zero copy buffers for shared mem (integrated) gpus")
-                .global(true),
-        );
-    let matches = &arg.get_matches();
+    {
+        cmd = cmd
+            .arg(
+                Arg::new("ocl_devices")
+                    .short('o')
+                    .long("opencl")
+                    .help("Display OpenCL platforms and devices")
+                    .action(ArgAction::SetTrue)
+                    .global(true),
+            )
+            .arg(
+                Arg::new("zero_copy")
+                    .short('z')
+                    .long("zcb")
+                    .help("Enables zero copy buffers for shared mem (integrated) gpus")
+                    .action(ArgAction::SetTrue)
+                    .global(true),
+            );
+    }
 
-    if matches.is_present("low priority") {
+    let matches = cmd.get_matches();
+
+    if matches.get_flag("low_priority") {
         set_low_prio();
     }
 
-    if matches.is_present("ocl-devices") {
-        #[cfg(feature = "opencl")]
+    #[cfg(feature = "opencl")]
+    if matches.get_flag("ocl_devices") {
         ocl::platform_info();
         return;
     }
 
-    // plotting
-    /* subcommand
-    if let Some(matches) = matches.subcommand_matches("plot") {
-    */
-    let numeric_id = value_t!(matches, "numeric id", u64).unwrap_or_else(|e| e.exit());
-    let start_nonce = value_t!(matches, "start nonce", u64).unwrap_or_else(|e| e.exit());
-    let nonces = value_t!(matches, "nonces", u64).unwrap_or_else(|e| e.exit());
-    let output_path = value_t!(matches, "path", String).unwrap_or_else(|_| {
-        std::env::current_dir()
-            .unwrap()
-            .into_os_string()
-            .into_string()
-            .unwrap()
-    });
-    let mem = value_t!(matches, "memory", String).unwrap_or_else(|_| "0B".to_owned());
-    let cpu_threads = value_t!(matches, "cpu", u8).unwrap_or(0u8);
+    let numeric_id = *matches.get_one::<u64>("numeric_id").expect("numeric_id required");
 
-    let gpus = if matches.occurrences_of("gpu") > 0 {
-        let gpu = values_t!(matches, "gpu", String);
-        Some(gpu.unwrap())
-    } else {
-        None
-    };
+    let nonces = *matches.get_one::<u64>("nonces").expect("nonces required");
 
-    // work out number of cpu threads to use
+    let output_path = matches
+        .get_one::<String>("path")
+        .cloned()
+        .unwrap_or_else(|| {
+            std::env::current_dir()
+                .unwrap()
+                .into_os_string()
+                .into_string()
+                .unwrap()
+        });
+
+    let mem = matches.get_one::<String>("memory").cloned().unwrap();
+
+    let cpu_threads_input = matches.get_one::<u8>("cpu").copied().unwrap_or(0);
+
+    // Fixed type inference
+    let gpus: Option<Vec<String>> = matches
+        .get_many::<String>("gpu")
+        .map(|v| v.cloned().collect());
+
+    // CPU thread calculation
     let cores = sys_info::cpu_num().unwrap() as u8;
-    let cpu_threads = if cpu_threads == 0 {
+    let mut cpu_threads = if cpu_threads_input == 0 {
         cores
     } else {
-        min(2 * cores, cpu_threads)
+        min(2 * cores, cpu_threads_input)
     };
 
-    // special case: dont use cpu if only a gpu is defined
     #[cfg(feature = "opencl")]
-    let cpu_threads = if matches.occurrences_of("gpu") > 0 && matches.occurrences_of("cpu") == 0 {
-        0u8
-    } else {
-        cpu_threads
-    };
+    if matches.contains_id("gpu") && !matches.contains_id("cpu") {
+        cpu_threads = 0;
+    }
 
     let p = Plotter::new();
-    p.run(PlotterTask {
-        numeric_id,
-        start_nonce,
-        nonces,
-        output_path,
-        mem,
-        cpu_threads,
-        gpus,
-        direct_io: !matches.is_present("disable direct i/o"),
-        async_io: !matches.is_present("disable async i/o"),
-        quiet: matches.is_present("non-verbosity"),
-        benchmark: matches.is_present("benchmark"),
-        zcb: matches.is_present("zero-copy"),
-    });
+
+    if let Some(&auto_count) = matches.get_one::<u64>("start_nonce_auto") {
+        if auto_count == 0 {
+            eprintln!("Error: --sna count must be >= 1");
+            process::exit(1);
+        }
+
+        if !matches.get_flag("quiet") {
+            println!("--sna enabled: plotting {auto_count} sequential file(s)");
+        }
+
+        let mut current_start = 0u64;
+        let mut actual_nonces_per_file: u64 = nonces;  // fallback
+
+        // First: scan for existing files to find where to continue
+        if let Ok(entries) = std::fs::read_dir(&output_path) {
+            let mut max_end: u64 = 0;
+            let prefix = format!("{}_", numeric_id);
+
+            for entry in entries.flatten() {
+                if let Some(file_name) = entry.file_name().to_str() {
+                    if file_name.starts_with(&prefix) {
+                        let parts: Vec<&str> = file_name.split('_').collect();
+                        if parts.len() >= 3 {
+                            if let (Ok(sn), Ok(cnt)) = (parts[1].parse::<u64>(), parts[2].parse::<u64>()) {
+                                let end = sn + cnt;
+                                if end > max_end {
+                                    max_end = end;
+                                    actual_nonces_per_file = cnt;  // Use real plotted count
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            current_start = max_end;
+        }
+
+        if !matches.get_flag("quiet") {
+            println!("Starting from nonce {current_start}");
+            if actual_nonces_per_file != nonces {
+                println!("Detected aligned nonce count per file: {actual_nonces_per_file} (from existing file)");
+            }
+        }
+
+        // Now plot each file one by one
+        for i in 0..auto_count {
+            let this_start = current_start + i * actual_nonces_per_file;
+
+            if !matches.get_flag("quiet") {
+                println!("\n--- Plotting file {} of {auto_count}: start_nonce = {this_start} ---", i + 1);
+            }
+
+            let file_task = PlotterTask {
+                numeric_id,
+                start_nonce: this_start,
+                nonces,  // pass original — plotter will round it down if needed
+                output_path: output_path.clone(),
+                mem: mem.clone(),
+                cpu_threads,
+                gpus: gpus.clone(),
+                direct_io: !matches.get_flag("disable_direct_io"),
+                async_io: !matches.get_flag("disable_async_io"),
+                quiet: matches.get_flag("quiet"),
+                benchmark: matches.get_flag("benchmark"),
+                zcb: matches.get_flag("zero_copy"),
+            };
+
+            p.run(file_task);
+
+            // After plotting this file, update actual_nonces_per_file from the new filename
+            // (in case alignment changed or first file)
+            if let Ok(entries) = std::fs::read_dir(&output_path) {
+                let mut latest_cnt: u64 = actual_nonces_per_file;
+                let prefix = format!("{}_", numeric_id);
+
+                for entry in entries.flatten() {
+                    if let Some(file_name) = entry.file_name().to_str() {
+                        if file_name.starts_with(&prefix) {
+                            let parts: Vec<&str> = file_name.split('_').collect();
+                            if parts.len() >= 3 {
+                                if let (Ok(sn), Ok(cnt)) = (parts[1].parse::<u64>(), parts[2].parse::<u64>()) {
+                                    if sn == this_start {
+                                        latest_cnt = cnt;
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                actual_nonces_per_file = latest_cnt;
+            }
+        }
+    } else {
+        let start_nonce = *matches.get_one::<u64>("start_nonce").expect("--sn is required when not using --sna");
+
+        p.run(PlotterTask {
+            numeric_id,
+            start_nonce,
+            nonces,
+            output_path,
+            mem,
+            cpu_threads,
+            gpus,
+            direct_io: !matches.get_flag("disable_direct_io"),
+            async_io: !matches.get_flag("disable_async_io"),
+            quiet: matches.get_flag("quiet"),
+            benchmark: matches.get_flag("benchmark"),
+            zcb: matches.get_flag("zero_copy"),
+        });
+    }
 }

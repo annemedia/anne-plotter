@@ -6,13 +6,14 @@ use std::cmp::min;
 use std::io::{Read, Seek, SeekFrom, Write, Error, ErrorKind};
 use std::path::Path;
 use std::sync::Arc;
+use indicatif::ProgressBar;
 
 const TASK_SIZE: u64 = 16384;
 
 pub fn create_writer_thread(
     task: Arc<PlotterTask>,
     mut nonces_written: u64,
-    mut pb: Option<pbr::ProgressBar<pbr::Pipe>>,
+    pb: Option<ProgressBar>,
     rx_buffers_to_writer: Receiver<PageAlignedByteBuffer>,
     tx_empty_buffers: Sender<PageAlignedByteBuffer>,
 ) -> impl FnOnce() {
@@ -28,60 +29,76 @@ pub fn create_writer_thread(
                 task.numeric_id, task.start_nonce, task.nonces
             ));
             if !task.benchmark {
-                let file = if task.direct_io {
+                let file_result = if task.direct_io {
                     open_using_direct_io(&filename)
                 } else {
                     open(&filename)
                 };
+                let mut file = match file_result {
+                    Ok(f) => f,
+                    Err(e) if e.raw_os_error() == Some(libc::EINVAL as i32) => {
+                      //  eprintln!("Warning: O_DIRECT open failed: {}. Using normal I/O.", e);
+                        match open(&filename) {
+                            Ok(f) => f,
+                            Err(e2) => {
+                                eprintln!("Error: Normal open also failed: {}", e2);
 
-                let mut file = file.unwrap();
+                                tx_empty_buffers.send(buffer).unwrap();
+                                continue;
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("Error: File open failed: {}", e);
+
+                        tx_empty_buffers.send(buffer).unwrap();
+                        continue;
+                    }
+                };
 
                 for scoop in 0..4096 {
                     let mut seek_addr = scoop * task.nonces as u64 * SCOOP_SIZE;
                     seek_addr += nonces_written as u64 * SCOOP_SIZE;
 
-                    file.seek(SeekFrom::Start(seek_addr)).unwrap();
+                    if let Err(e) = file.seek(SeekFrom::Start(seek_addr)) {
+                        eprintln!("Seek failed for scoop {}: {}. Skipping scoop.", scoop, e);
+                        continue;
+                    }
 
                     let mut local_addr = scoop * buffer_size / NONCE_SIZE * SCOOP_SIZE;
                     for _ in 0..nonces_to_write / TASK_SIZE {
-                        file.write_all(
+                        if let Err(e) = file.write_all(
                             &bs[local_addr as usize
                                 ..(local_addr + TASK_SIZE * SCOOP_SIZE) as usize],
-                        )
-                        .unwrap();
-
+                        ) {
+                            eprintln!("Write failed in scoop {}: {}. Skipping chunk.", scoop, e);
+                            break;
+                        }
                         local_addr += TASK_SIZE * SCOOP_SIZE;
                     }
 
-                    // write remainder
                     if nonces_to_write % TASK_SIZE > 0 {
-                        file.write_all(
+                        if let Err(e) = file.write_all(
                             &bs[local_addr as usize
                                 ..(local_addr + (nonces_to_write % TASK_SIZE) * SCOOP_SIZE)
-                                    as usize],
-                        )
-                        .unwrap();
+                                as usize],
+                        ) {
+                            eprintln!("Remainder write failed in scoop {}: {}. Skipping.", scoop, e);
+                        }
                     }
 
                     if (scoop + 1) % 128 == 0 {
-                        match &mut pb {
-                            Some(pb) => {
-                                pb.add(nonces_to_write * SCOOP_SIZE * 128);
-                            }
-                            None => (),
+                        if let Some(pb_ref) = &pb {
+                            pb_ref.inc(nonces_to_write * SCOOP_SIZE * 128u64);
                         }
                     }
                 }
             }
             nonces_written += nonces_to_write;
 
-            // thread end
             if task.nonces == nonces_written {
-                match &mut pb {
-                    Some(pb) => {
-                        pb.finish_print("Writer done.");
-                    }
-                    None => (),
+                if let Some(pb_ref) = &pb {
+                    pb_ref.finish_with_message("Writer done.");
                 }
                 tx_empty_buffers.send(buffer).unwrap();
                 break;

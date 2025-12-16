@@ -282,6 +282,23 @@ pub fn gpu_get_info(gpus: &[String], quiet: bool) -> u64 {
         let kernel = core::create_kernel(&program, "calculate_nonces").unwrap();
         let kernel_workgroup_size = get_kernel_work_group_size(&kernel, device);
 
+        // --- INSERT THIS NEW BLOCK HERE ---
+        let max_alloc_size = match core::get_device_info(&device, DeviceInfo::MaxMemAllocSize).unwrap() {
+            core::DeviceInfoResult::MaxMemAllocSize(size) => size,
+            _ => panic!("Unexpected error. Can't obtain max mem alloc size."),
+        };
+        let worksize = kernel_workgroup_size * gpu_cores;
+        let per_buffer_size = worksize as u64 * NONCE_SIZE as u64;
+        if per_buffer_size > max_alloc_size {
+            println!(
+                "Error: Requested per-buffer size {} bytes exceeds device max alloc {} bytes.",
+                per_buffer_size, max_alloc_size
+            );
+            println!("Reduce GPU cores (current: {}) or try --zcb for zero-copy mode.", gpu_cores);
+            process::exit(1);
+        }
+        // --- END INSERT ---
+
         let gpu_cores = if gpu_cores == 0 {
             max_compute_units as usize
         } else {
@@ -316,13 +333,14 @@ pub fn gpu_get_info(gpus: &[String], quiet: bool) -> u64 {
     total_mem_needed
 }
 
-pub fn gpu_init(gpus: &[String], zcb: bool) -> Vec<Arc<Mutex<GpuContext>>> {
+pub fn gpu_init(gpus: &[String], mut zcb: bool) -> Vec<Arc<Mutex<GpuContext>>> {
     let mut result = Vec::new();
     for gpu in gpus.iter() {
-        let gpu = gpu.split(':').collect::<Vec<&str>>();
-        let platform_id = gpu[0].parse::<usize>().unwrap();
-        let gpu_id = gpu[1].parse::<usize>().unwrap();
-        let gpu_cores = gpu[2].parse::<usize>().unwrap();
+        let parts: Vec<&str> = gpu.split(':').collect();
+        let platform_id = parts[0].parse::<usize>().unwrap();
+        let gpu_id = parts[1].parse::<usize>().unwrap();
+        let gpu_cores = parts[2].parse::<usize>().unwrap();
+
         let platform_ids = core::get_platform_ids().unwrap();
         if platform_id >= platform_ids.len() {
             println!("Error: Selected OpenCL platform doesn't exist.");
@@ -337,18 +355,29 @@ pub fn gpu_init(gpus: &[String], zcb: bool) -> Vec<Arc<Mutex<GpuContext>>> {
             process::exit(0);
         }
         let device = device_ids[gpu_id];
+
         let max_compute_units =
             match core::get_device_info(&device, DeviceInfo::MaxComputeUnits).unwrap() {
                 core::DeviceInfoResult::MaxComputeUnits(mcu) => mcu,
                 _ => panic!("Unexpected error. Can't obtain number of GPU cores."),
             };
-        let vendor = to_string!(core::get_device_info(&device, DeviceInfo::Vendor)).to_uppercase();
-        let nvidia = vendor.contains("NVIDIA");
+
+        // Detect vendor and force zero-copy on Intel GPUs
+        let vendor_str = to_string!(core::get_device_info(&device, DeviceInfo::Vendor));
+        let vendor_lower = vendor_str.to_lowercase();
+        let nvidia = vendor_lower.contains("nvidia");
+        let intel = vendor_lower.contains("intel");
+
+        if intel {
+            zcb = true; // Force zero-copy for Intel iGPUs — fixes CL_OUT_OF_RESOURCES
+        }
+
         let gpu_cores = if gpu_cores == 0 {
             max_compute_units as usize
         } else {
             min(gpu_cores, max_compute_units as usize)
         };
+
         result.push(Arc::new(Mutex::new(GpuContext::new(
             platform_id,
             gpu_id,
@@ -597,31 +626,27 @@ fn mem_unmap_gpu_to_host(buffer_id: u8, gpu_context: &GpuContext, map: Option<co
 }
 
 fn mem_transfer_gpu_to_host(buffer_id: u8, gpu_context: &GpuContext, slice: &mut [u8]) {
-    unsafe {
-        if buffer_id == 1 {
+    const CHUNK_SIZE: usize = 256 * 1024 * 1024; // 256 MB per transfer chunk
+
+    let buffer = if buffer_id == 1 { &gpu_context.buffer_gpu_a } else { &gpu_context.buffer_gpu_b };
+    let queue = &gpu_context.queue_b;
+
+    for offset in (0..slice.len()).step_by(CHUNK_SIZE) {
+        let this_size = std::cmp::min(CHUNK_SIZE, slice.len() - offset);
+        unsafe {
             core::enqueue_read_buffer(
-                &gpu_context.queue_b,
-                &gpu_context.buffer_gpu_a,
-                false,
-                0,
-                slice,
-                None::<Event>,
-                None::<&mut Event>,
-            )
-            .unwrap();
-        } else {
-            core::enqueue_read_buffer(
-                &gpu_context.queue_b,
-                &gpu_context.buffer_gpu_b,
-                false,
-                0,
-                slice,
+                queue,
+                buffer,
+                false,  // non-blocking
+                offset,
+                &mut slice[offset..offset + this_size],
                 None::<Event>,
                 None::<&mut Event>,
             )
             .unwrap();
         }
     }
+    core::finish(queue).unwrap(); // Ensure all chunks complete
 }
 
 // simd shabal words unpack + POC Shuffle + scatter nonces into optimised cache

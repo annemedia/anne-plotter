@@ -2,7 +2,7 @@ use std::fs::{File, OpenOptions};
 use std::io;
 use std::path::Path;
 
-cfg_if! {
+cfg_if::cfg_if! {
     if #[cfg(unix)] {
         #[cfg(target_os = "linux")]
         extern crate thread_priority;
@@ -16,13 +16,14 @@ cfg_if! {
         const O_DIRECT: i32 = 0o0_040_000;
 
         pub fn set_low_prio() {
-            // todo: low prio for macos
+
             #[cfg(target_os = "linux")]
             set_current_thread_priority(ThreadPriority::Min).unwrap();
         }
 
         pub fn open_using_direct_io<P: AsRef<Path>>(path: P) -> io::Result<File> {
             OpenOptions::new()
+                .read(true)
                 .write(true)
                 .create(true)
                 .custom_flags(O_DIRECT)
@@ -41,33 +42,61 @@ cfg_if! {
                 .read(true)
                 .open(path)
         }
-        // On unix, get the device id from 'df' command
-        fn get_device_id_unix(path: &str) -> String {
-            let output = Command::new("df")
-                 .arg(path)
-                 .output()
-                 .expect("failed to execute 'df --output=source'");
-             let source = String::from_utf8(output.stdout).expect("not utf8");
-             source.split('\n').collect::<Vec<&str>>()[1].split(' ').collect::<Vec<&str>>()[0].to_string()
-         }
+        
 
-        // On macos, use df and 'diskutil info <device>' to get the Device Block Size line
-        // and extract the size
+        fn get_device_id_unix(path: &str) -> String {
+
+            let path_obj = Path::new(path);
+            let parent = path_obj.parent()
+                .unwrap_or_else(|| Path::new("/"));
+            
+            if !parent.exists() {
+                panic!("Parent directory does not exist: {:?}. Please create it first.", parent);
+            }
+            
+
+            let actual_path = parent.to_str().unwrap();
+            
+
+            let output = Command::new("df")
+                .arg("--output=source")
+                .arg(actual_path)
+                .output()
+                .expect("failed to execute 'df --output=source'");
+            
+            let source = String::from_utf8(output.stdout).expect("not utf8");
+            let lines: Vec<&str> = source.trim().split('\n').collect();
+            
+            if lines.len() >= 2 {
+                let device = lines[1].trim();
+                if !device.is_empty() {
+                    return device.to_string();
+                }
+            }
+            
+            panic!("Could not determine device for path: {} (parent: {})", path, actual_path);
+        }
+
         fn get_sector_size_macos(path: &str) -> u64 {
             let source = get_device_id_unix(path);
             let output = Command::new("diskutil")
                 .arg("info")
-                .arg(source)
+                .arg(&source)
                 .output()
                 .expect("failed to execute 'diskutil info'");
             let source = String::from_utf8(output.stdout).expect("not utf8");
             let mut sector_size: u64 = 0;
-            for line in source.split('\n').collect::<Vec<&str>>() {
+            for line in source.split('\n') {
                 if line.trim().starts_with("Device Block Size") {
-                    // e.g. in reverse: "Bytes 512 Size Block Device"
-                    let source = line.rsplit(' ').collect::<Vec<&str>>()[1];
 
-                    sector_size = source.parse::<u64>().unwrap();
+                    let parts: Vec<&str> = line.split(':').collect();
+                    if parts.len() >= 2 {
+                        let value_part = parts[1].trim();
+
+                        let size_str = value_part.split_whitespace().next().unwrap_or("4096");
+                        sector_size = size_str.parse::<u64>().unwrap_or(4096);
+                        break;
+                    }
                 }
             }
             if sector_size == 0 {
@@ -76,23 +105,51 @@ cfg_if! {
             sector_size
         }
 
-        // On unix, use df and lsblk to extract the device sector size
         fn get_sector_size_unix(path: &str) -> u64 {
             let source = get_device_id_unix(path);
-            let output = Command::new("lsblk")
-                .arg(source)
+            
+
+            let output = match Command::new("lsblk")
+                .arg(&source)
                 .arg("-o")
-                .arg("PHY-SeC") // I'm strict here, LOG-SeC would do
-                .output()
-                .expect("failed to execute 'lsblk -o PHY-SeC'");
+                .arg("PHY-SEC")
+                .arg("-b")
+                .arg("-n")
+                .output() {
+                    Ok(output) => output,
+                    Err(_) => {
 
-            let sector_size = String::from_utf8(output.stdout).expect("not utf8");
-            let sector_size = sector_size.split('\n').collect::<Vec<&str>>().get(1).unwrap_or_else(|| {
-                println!("failed to determine sector size, defaulting to 4096.");
-                &"4096"
-            }).trim();
+                        return get_sector_size_fallback(&source);
+                    }
+                };
 
-            sector_size.parse::<u64>().unwrap()
+            let sector_size_str = String::from_utf8(output.stdout).expect("not utf8");
+            let sector_size = sector_size_str.trim();
+            
+            if sector_size.is_empty() {
+                return get_sector_size_fallback(&source);
+            }
+            
+            sector_size.parse::<u64>().unwrap_or_else(|_| {
+                println!("Warning: Failed to parse sector size '{}', defaulting to 512", sector_size);
+                4096
+            })
+        }
+
+        fn get_sector_size_fallback(device: &str) -> u64 {
+            match Command::new("blockdev")
+                .arg("--getpbsz")
+                .arg(device)
+                .output() {
+                    Ok(output) => {
+                        let size_str = String::from_utf8(output.stdout).expect("not utf8");
+                        size_str.trim().parse::<u64>().unwrap_or(4096)
+                    }
+                    Err(_) => {
+                        println!("Warning: Could not determine sector size, defaulting to 4096");
+                        4096
+                    }
+                }
         }
 
         pub fn get_sector_size(path: &str) -> u64 {
@@ -104,29 +161,66 @@ cfg_if! {
         }
 
         pub fn preallocate(file: &Path, size_in_bytes: u64, use_direct_io: bool) {
-            let file = if use_direct_io {
-                open_using_direct_io(&file)
+            if use_direct_io {
+
+                preallocate_direct_io(file, size_in_bytes)
             } else {
-                open(&file)
-            };
-            let file = file.unwrap();
+                preallocate_normal(file, size_in_bytes)
+            }
+        }
+
+        fn preallocate_normal(file: &Path, size_in_bytes: u64) {
+            let file = open(&file).unwrap();
             match file.allocate(size_in_bytes) {
                 Err(errno) => {
-                    // Exit if preallocate fails because write_resume_info() assumes
-                    // that the file isn't zero sized.
-                    println!("\n\nError: couldn't preallocate space for file. {}\n\
-                              Probable causes are:\n \
-                              * fallocate() is only supported on ext4 filesystems.\n \
-                              * Insufficient space.\n", errno);
+                    eprintln!("\n\nError: couldn't preallocate space for file. {}\n\
+                            Probable causes are:\n \
+                            * fallocate() is only supported on ext4 filesystems.\n \
+                            * Insufficient space.\n", errno);
                     process::exit(1);
                 }
                 Ok(_) => (),
             }
         }
 
+        fn preallocate_direct_io(file: &Path, size_in_bytes: u64) {
+
+            let sector_size = get_sector_size(file.to_str().unwrap_or("/"));
+            let aligned_size = ((size_in_bytes + sector_size - 1) / sector_size) * sector_size;
+            
+
+            let file_result = open_using_direct_io(&file);
+            
+            match file_result {
+                Ok(file) => {
+
+                    use std::os::unix::io::AsRawFd;
+                    use libc::{ftruncate, c_int};
+                    
+                    let fd = file.as_raw_fd();
+                    
+                    unsafe {
+                        if ftruncate(fd as c_int, aligned_size as i64) != 0 {
+                            let err = io::Error::last_os_error();
+                            println!("\n\nError: couldn't allocate space for O_DIRECT file. {}\n\
+                                      Probable causes are:\n \
+                                      * O_DIRECT requires aligned sizes\n \
+                                      * Filesystem doesn't support O_DIRECT properly\n \
+                                      * Try running without direct I/O flag\n", err);
+                            process::exit(1);
+                        }
+                    }
+                }
+                Err(e) => {
+
+                    eprintln!("\nWarning: O_DIRECT open failed: {}. Using normal I/O.", e);
+                    preallocate_normal(file, size_in_bytes);
+                }
+            }
+        }
+
         pub fn free_disk_space(path: &str) -> u64 {
-            // I don't like the following code, but I had to. It's difficult to estimate the space available for a new file on ext4 due to overhead.
-            // Therefor I enforce a 2MB cushion assuming this is sufficient.
+
             fs2::available_space(Path::new(&path)).unwrap().saturating_sub(2097152)
         }
 
@@ -262,7 +356,7 @@ cfg_if! {
         }
 
         pub fn set_thread_ideal_processor(id: usize){
-            // Set core affinity for current thread.
+
         unsafe {
             SetThreadIdealProcessor(
                 GetCurrentThread(),

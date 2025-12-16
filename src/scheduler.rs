@@ -20,21 +20,15 @@ pub fn create_scheduler_thread(
     task: Arc<PlotterTask>,
     thread_pool: rayon::ThreadPool,
     mut nonces_hashed: u64,
-    mut pb: Option<pbr::ProgressBar<pbr::Pipe>>,
+    pb: Option<indicatif::ProgressBar>,
     rx_empty_buffers: Receiver<PageAlignedByteBuffer>,
     tx_buffers_to_writer: Sender<PageAlignedByteBuffer>,
     simd_ext: SimdExtension,
 ) -> impl FnOnce() {
     move || {
-        // synchronisation chanel for all hashing devices (CPU+GPU)
-        // message protocol:    (hash_device_id: u8, message: u8, nonces processed: u64)
-        // hash_device_id:      0=CPU, 1=GPU0, 2=GPU1...
-        // message:             0 = data ready to write
-        //                      1 = device ready to compute next hashing batch
-        // nonces_processed:    nonces hashed / nonces writen to host buffer
+
         let (tx, rx) = channel();
 
-        // create gpu threads and channels
         #[cfg(feature = "opencl")]
         let gpu_contexts = match &task.gpus {
             Some(x) => Some(gpu_init(&x, task.zcb)),
@@ -73,10 +67,9 @@ pub fn create_scheduler_thread(
             let mut requested = 0u64;
             let mut processed = 0u64;
 
-            // kickoff first gpu and cpu runs
             #[cfg(feature = "opencl")]
             for (i, gpu) in gpus.iter().enumerate() {
-                // schedule next gpu task
+
                 let gpu = gpu.lock().unwrap();
                 let task_size = min(gpu.worksize as u64, nonces_to_hash - requested);
                 if task_size > 0 {
@@ -95,7 +88,7 @@ pub fn create_scheduler_thread(
                         .unwrap();
                 }
                 requested += task_size;
-                //println!("Debug: Device: {} started. {} nonces assigned. Total requested: {}\n\n\n",i+1,task_size,requested);
+
             }
 
             for _ in 0..task.cpu_threads {
@@ -120,15 +113,14 @@ pub fn create_scheduler_thread(
                 requested += task_size;
             }
 
-            // control loop
             let rx = &rx;
             for msg in rx {
                 match msg.1 {
-                    // process a request for work: provide a task or signal completion
+
                     1 => {
                         let task_size = match msg.0 {
                             0 => {
-                                // schedule next cpu task
+
                                 let task_size = min(CPU_TASK_SIZE, nonces_to_hash - requested);
                                 if task_size > 0 {
                                     let task = hash_cpu(
@@ -152,14 +144,13 @@ pub fn create_scheduler_thread(
                                 task_size
                             }
                             _ => {
-                                // schedule next gpu task
+
                                 #[cfg(feature = "opencl")]
                                 let gpu = gpus[(msg.0 - 1) as usize].lock().unwrap();
                                 #[cfg(feature = "opencl")]
                                 let task_size =
                                     min(gpu.worksize as u64, nonces_to_hash - requested);
 
-                                // optimisation: leave some work for cpu in dual mode
                                 #[cfg(feature = "opencl")]
                                 let task_size = if task_size < gpu.worksize as u64
                                     && task.cpu_threads > 0
@@ -194,16 +185,13 @@ pub fn create_scheduler_thread(
                         };
 
                         requested += task_size;
-                        //println!("Debug: Device: {} asked for work. {} nonces assigned. Total requested: {}\n\n\n",msg.0,task_size,requested);
+
                     }
-                    // process work completed message
+
                     0 => {
                         processed += msg.2;
-                        match &mut pb {
-                            Some(pb) => {
-                                pb.add(msg.2 * NONCE_SIZE);
-                            }
-                            None => (),
+                        if let Some(pb) = &pb {
+                            pb.inc(msg.2 * NONCE_SIZE);
                         }
                     }
                     _ => {}
@@ -215,24 +203,19 @@ pub fn create_scheduler_thread(
 
             nonces_hashed += nonces_to_hash;
 
-            // queue buffer for writing
             tx_buffers_to_writer.send(buffer).unwrap();
 
-            // thread end
             if task.nonces == nonces_hashed {
-                match &mut pb {
-                    Some(pb) => {
-                        pb.finish_print("Hasher done.");
-                    }
-                    None => (),
+                if let Some(pb) = &pb {
+                    pb.finish_with_message("Hasher done.");
                 }
-                // shutdown gpu threads
+
                 #[cfg(feature = "opencl")]
                 for gpu in &gpu_channels {
                     gpu.0.send(None).unwrap();
                 }
                 break;
-            };
+            }
         }
     }
 }

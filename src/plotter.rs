@@ -1,5 +1,6 @@
 use humanize_rs::bytes::Bytes;
-use pbr::{MultiBar, Units};
+
+use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use raw_cpuid::CpuId;
 
 use crate::cpu_hasher::{SimdExtension,init_simd};
@@ -46,11 +47,11 @@ impl Plotter {
         Plotter {}
     }
 
-    pub fn run(self, mut task: PlotterTask) {
+    pub fn run(&self, mut task: PlotterTask) {
         let cpuid = CpuId::new();
         let cpu_name = cpuid
             .get_processor_brand_string()
-            .map(|s| s.as_str().trim().to_string())  // Changed: use .as_str() first
+            .map(|s| s.as_str().trim().to_string())
             .unwrap_or_else(|| {
                 cpuid
                     .get_vendor_info()
@@ -60,11 +61,11 @@ impl Plotter {
         
         let cores = sys_info::cpu_num().unwrap();
         let memory = sys_info::mem_info().unwrap();
-        
+
         let simd_ext = init_simd();
 
         if !task.quiet {
-            println!("anne-plotter {}\n", crate_version!());
+           println!("anne-plotter {}\n", env!("CARGO_PKG_VERSION"));
         }
 
         if !task.quiet && task.benchmark {
@@ -97,7 +98,6 @@ impl Plotter {
             gpu_mem_needed / 2
         };
 
-        // use all avaiblable disk space if nonce parameter has been omitted
         let free_disk_space = free_disk_space(&task.output_path);
         if task.nonces == 0 {
             task.nonces = free_disk_space / NONCE_SIZE;
@@ -105,7 +105,6 @@ impl Plotter {
 
         let gpu = task.gpus.is_some();
 
-        // align number of nonces with sector size if direct i/o
         let mut rounded_nonces_to_sector_size = false;
         let mut nonces_per_sector = 1;
         if task.direct_io {
@@ -134,7 +133,6 @@ impl Plotter {
             return;
         }
 
-        // check available disk space
         if free_disk_space < plotsize && !file.exists() && !task.benchmark {
             println!(
                 "Error: insufficient disk space, MiB_required={:.2}, MiB_available={:.2}",
@@ -145,7 +143,6 @@ impl Plotter {
             return;
         }
 
-        // calculate memory usage
         let mem = match calculate_mem_to_use(&task, &memory, nonces_per_sector, gpu, gpu_mem_needed)
         {
             Ok(x) => x,
@@ -225,7 +222,6 @@ impl Plotter {
             }
         }
 
-        // determine buffer size
         let num_buffer = if task.async_io { 2 } else { 1 };
         let buffer_size = mem / num_buffer;
         let (tx_empty_buffers, rx_empty_buffers) = bounded(num_buffer as usize);
@@ -236,28 +232,30 @@ impl Plotter {
             tx_empty_buffers.send(buffer).unwrap();
         }
 
-        let mb = MultiBar::new();
+        let mb = MultiProgress::new();
 
         let p1x = if !task.quiet {
-            let mut p1 = mb.create_bar(plotsize - progress * NONCE_SIZE);
-            p1.format("│██░│");
-            p1.set_units(Units::Bytes);
-            p1.message("Hashing: ");
-            p1.show_counter = false;
-            p1.set(0);
-            Some(p1)
+            let pb = mb.add(ProgressBar::new(plotsize - progress * NONCE_SIZE));
+            pb.set_style(ProgressStyle::default_bar()
+                .template("{prefix:>12} {wide_bar} {bytes:>8} {bytes_per_sec:>10}")
+                .expect("Failed to set template")
+                .progress_chars("██░"));
+            pb.set_prefix("Hashing:");
+            pb.enable_steady_tick(std::time::Duration::from_millis(200));
+            Some(pb)
         } else {
             None
         };
 
         let p2x = if !task.quiet {
-            let mut p2 = mb.create_bar(plotsize - progress * NONCE_SIZE);
-            p2.format("│██░│");
-            p2.set_units(Units::Bytes);
-            p2.message("Writing: ");
-            p2.show_counter = false;
-            p2.set(0);
-            Some(p2)
+        let pb = mb.add(ProgressBar::new(plotsize - progress * NONCE_SIZE));
+        pb.set_style(ProgressStyle::default_bar()
+            .template("{prefix:>12} {wide_bar} {bytes:>8} {bytes_per_sec:>10}")
+            .expect("Failed to set template")
+            .progress_chars("██░"));
+        pb.set_prefix("Writing:");
+        pb.enable_steady_tick(std::time::Duration::from_millis(200));
+        Some(pb)
         } else {
             None
         };
@@ -265,7 +263,6 @@ impl Plotter {
         let sw = Stopwatch::start_new();
         let task = Arc::new(task);
 
-        // hi bold! might make this optional in future releases.
         let thread_pinning = true;
         let core_ids = if thread_pinning {
             core_affinity::get_core_ids().unwrap()
@@ -308,11 +305,13 @@ impl Plotter {
             )
         });
 
-        if !task.quiet {
-            mb.listen();
-        }
         writer.join().unwrap();
         hasher.join().unwrap();
+
+        if !task.quiet {
+
+            let _ = mb.clear();
+        }
 
         let elapsed = sw.elapsed_ms() as u64;
         let hours = elapsed / 1000 / 60 / 60;
@@ -371,27 +370,22 @@ fn calculate_mem_to_use(
     }
     mem = min(mem, plotsize + gpu_mem_needed);
 
-    // opencl requires buffer to be a multiple of 16 (data coalescence magic)
     let nonces_per_sector = if gpu {
         max(16, nonces_per_sector)
     } else {
         nonces_per_sector
     };
 
-    // don't exceed free memory and leave some elbow room 1-1000/1024
     mem = min(mem, get_avail_mem(&memory) * 1000 - gpu_mem_needed);
 
-    // rounding single/double buffer
     let num_buffer = if task.async_io { 2 } else { 1 };
     mem /= num_buffer * NONCE_SIZE * nonces_per_sector;
     mem *= num_buffer * NONCE_SIZE * nonces_per_sector;
 
-    // ensure a minimum buffer
     mem = max(mem, num_buffer * NONCE_SIZE * nonces_per_sector);
     Ok(mem)
 }
 
-// sys_info ex, displays 0 avail on win
 #[cfg(not(windows))]
 fn get_avail_mem(memory: &sys_info::MemInfo) -> u64 {
     memory.avail
