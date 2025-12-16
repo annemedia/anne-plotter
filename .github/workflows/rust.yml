@@ -3,8 +3,8 @@ name: Build Binaries
 
 on:
   release:
-    types: [published]      # Auto-run on new GitHub Release
-  workflow_dispatch:        # Allow manual run
+    types: [published]
+  workflow_dispatch:
 
 jobs:
   build:
@@ -21,14 +21,14 @@ jobs:
             features: opencl
             name: anne-plotter-windows.exe
 
-          - os: macos-15-intel     # New Intel runner (replaces macos-13)
+          - os: macos-15-intel   # Intel Mac
             target: x86_64-apple-darwin
-            features: opencl
+            features: ""          # No OpenCL on macOS
             name: anne-plotter-macos-intel
 
-          - os: macos-latest       # Apple Silicon (arm64)
+          - os: macos-latest     # Apple Silicon
             target: aarch64-apple-darwin
-            features: opencl
+            features: ""          # No OpenCL on macOS
             name: anne-plotter-macos-arm64
 
     runs-on: ${{ matrix.os }}
@@ -40,12 +40,14 @@ jobs:
         with:
           targets: ${{ matrix.target }}
 
-      - name: Install OpenCL deps (Linux)
+      - name: Install OpenCL deps (Linux only)
         if: matrix.os == 'ubuntu-latest'
         run: sudo apt-get update && sudo apt-get install -y ocl-icd-opencl-dev
 
-      - name: Build with OpenCL
-        run: cargo build --release --target ${{ matrix.target }} --features ${{ matrix.features }}
+      - name: Build
+        run: >-
+          cargo build --release --target ${{ matrix.target }}
+          ${{ matrix.features != '' && format('--features {0}', matrix.features) || '' }}
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
