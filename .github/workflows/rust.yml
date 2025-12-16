@@ -1,0 +1,72 @@
+# .github/workflows/build.yml
+name: Build Binaries
+
+on:
+  release:
+    types: [published]      # Auto-run on new GitHub Release
+  workflow_dispatch:        # Allow manual run
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            features: opencl
+            name: anne-plotter-linux-x86_64
+
+          - os: windows-latest
+            target: x86_64-pc-windows-gnu
+            features: opencl
+            name: anne-plotter-windows.exe
+
+          - os: macos-13          # Intel Mac runner
+            target: x86_64-apple-darwin
+            features: opencl
+            name: anne-plotter-macos-intel
+
+          - os: macos-latest      # Apple Silicon runner
+            target: aarch64-apple-darwin
+            features: opencl
+            name: anne-plotter-macos-arm64
+
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Build with OpenCL
+        run: cargo build --release --target ${{ matrix.target }} --features ${{ matrix.features }}
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.name }}
+          path: target/${{ matrix.target }}/release/anne-plotter*
+
+  # Optional: Combine macOS binaries into universal (runs on macos-latest)
+  universal-macos:
+    needs: build
+    runs-on: macos-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: anne-plotter-macos-*
+          merge-multiple: true
+          path: macos-binaries
+
+      - name: Create universal binary
+        run: |
+          lipo -create -output anne-plotter-macos-universal \
+            macos-binaries/anne-plotter-macos-intel/anne-plotter \
+            macos-binaries/anne-plotter-macos-arm64/anne-plotter
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: anne-plotter-macos-universal
+          path: anne-plotter-macos-universal
