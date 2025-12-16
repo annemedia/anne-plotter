@@ -4,7 +4,7 @@ name: Build Binaries
 on:
   release:
     types: [published]      # Auto-run on new GitHub Release
-  workflow_dispatch:        # Allow manual run
+  workflow_dispatch:        # Allow manual run 
 
 jobs:
   build:
