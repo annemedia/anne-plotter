@@ -11,29 +11,20 @@ jobs:
     strategy:
       matrix:
         include:
-          # Linux x86_64 – full GPU/OpenCL
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
             features: opencl
             name: anne-plotter-linux-x86_64
 
-          # Windows x86_64 – full GPU/OpenCL
           - os: windows-latest
             target: x86_64-pc-windows-gnu
             features: opencl
             name: anne-plotter-windows.exe
 
-          # macOS Intel – CPU only
           - os: macos-15-intel
             target: x86_64-apple-darwin
             features: ""
-            name: anne-plotter-macos-intel
-
-          # macOS Apple Silicon – CPU only
-          - os: macos-latest
-            target: aarch64-apple-darwin
-            features: ""
-            name: anne-plotter-macos-arm64
+            name: anne-plotter-macos-x86_64
 
     runs-on: ${{ matrix.os }}
     steps:
@@ -45,7 +36,7 @@ jobs:
           targets: ${{ matrix.target }}
 
       - name: Install OpenCL headers (Linux only)
-        if: matrix.features == 'opencl' && matrix.os == 'ubuntu-latest'
+        if: matrix.features == 'opencl'
         run: sudo apt-get update && sudo apt-get install -y ocl-icd-opencl-dev
 
       - name: Build
@@ -58,24 +49,3 @@ jobs:
         with:
           name: ${{ matrix.name }}
           path: target/${{ matrix.target }}/release/anne-plotter*
-
-  universal-macos:
-    needs: build
-    runs-on: macos-latest
-    steps:
-      - uses: actions/download-artifact@v4
-        with:
-          pattern: anne-plotter-macos-*
-          merge-multiple: true
-          path: macos-binaries
-
-      - name: Create universal macOS binary
-        run: |
-          lipo -create -output anne-plotter-macos-universal \
-            macos-binaries/anne-plotter-macos-intel/anne-plotter \
-            macos-binaries/anne-plotter-macos-arm64/anne-plotter
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: anne-plotter-macos-universal
-          path: anne-plotter-macos-universal
