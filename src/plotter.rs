@@ -51,13 +51,13 @@ impl Plotter {
         let cpuid = CpuId::new();
         let cpu_name = cpuid
             .get_processor_brand_string()
-            .map(|s| s.as_str().trim().to_string())
-            .unwrap_or_else(|| {
+            .and_then(|bs| Some(bs.as_str().trim().to_string()))
+            .or_else(|| {
                 cpuid
                     .get_vendor_info()
-                    .map(|v| v.as_str().to_string())
-                    .unwrap_or_else(|| "Unknown CPU".to_string())
-            });
+                    .map(|vi| vi.as_str().to_string())
+            })
+            .unwrap_or_else(|| "Unknown CPU".to_string());
         
         let cores = sys_info::cpu_num().unwrap();
         let memory = sys_info::mem_info().unwrap();
