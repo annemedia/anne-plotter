@@ -36,12 +36,13 @@ jobs:
           targets: ${{ matrix.target }}
 
       - name: Install OpenCL headers (Linux only)
-        if: matrix.os == 'ubuntu-latest' && matrix.features == 'opencl'
+        if: matrix.os == 'ubuntu-latest'
         run: sudo apt-get update && sudo apt-get install -y ocl-icd-opencl-dev
 
       - name: Build
+        shell: bash  # Force bash on all platforms (including Windows)
         run: |
-          if [ "${{ matrix.features }}" != "" ]; then
+          if [ -n "${{ matrix.features }}" ]; then
             cargo build --release --target ${{ matrix.target }} --features ${{ matrix.features }}
           else
             cargo build --release --target ${{ matrix.target }}
