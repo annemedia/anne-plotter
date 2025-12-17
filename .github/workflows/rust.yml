@@ -36,13 +36,11 @@ jobs:
           targets: ${{ matrix.target }}
 
       - name: Install OpenCL headers (Linux only)
-        if: matrix.features == 'opencl'
+        if: matrix.os == 'ubuntu-latest' && matrix.features == 'opencl'
         run: sudo apt-get update && sudo apt-get install -y ocl-icd-opencl-dev
 
       - name: Build
-        run: >-
-          cargo build --release --target ${{ matrix.target }}
-          ${{ matrix.features != '' && format('--features {0}', matrix.features) || '' }}
+        run: cargo build --release --target ${{ matrix.target }} --features ${{ matrix.features }}
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
