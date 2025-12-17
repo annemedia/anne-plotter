@@ -18,7 +18,7 @@ simd=[]
 
 [dependencies]
 crossbeam-channel = "0.5.15"
-ocl-core = { version = "0.11.1", optional = true } 
+ocl-core = { version = "0.11.5", optional = true }
 clap = "4.5.53"
 raw-cpuid = "11.6.0"
 sys-info = "0.9.1"
@@ -43,3 +43,5 @@ cc = "1.0"
 
 [dev-dependencies]
 rust-crypto = "0.2.36"
+
+# .\anne-plotter.exe --n 1000 --id 968310216444800974 --path C:\Users\User\Documents\anneplots --sna 1 --gpu 0:0:3
