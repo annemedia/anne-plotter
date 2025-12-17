@@ -23,6 +23,7 @@ jobs:
 
           - os: macos-15-intel
             target: x86_64-apple-darwin
+            features: ""
             name: anne-plotter-macos-x86_64
 
     runs-on: ${{ matrix.os }}
@@ -35,11 +36,16 @@ jobs:
           targets: ${{ matrix.target }}
 
       - name: Install OpenCL headers (Linux only)
-        if: matrix.os == 'ubuntu-latest' && matrix.features == 'opencl'
+        if: matrix.features == 'opencl'
         run: sudo apt-get update && sudo apt-get install -y ocl-icd-opencl-dev
 
       - name: Build
-        run: cargo build --release --target ${{ matrix.target }} --features ${{ matrix.features }}
+        run: |
+          if [ -n "${{ matrix.features }}" ]; then
+            cargo build --release --target ${{ matrix.target }} --features ${{ matrix.features }}
+          else
+            cargo build --release --target ${{ matrix.target }}
+          fi
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
