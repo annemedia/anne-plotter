@@ -17,7 +17,7 @@ jobs:
             name: anne-plotter-linux-x86_64
 
           - os: windows-latest
-            target: x86_64-pc-windows-gnu
+            target: x86_64-pc-windows-msvc
             features: opencl
             name: anne-plotter-windows.exe
 
