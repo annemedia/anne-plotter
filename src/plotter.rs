@@ -48,17 +48,23 @@ impl Plotter {
     }
 
     pub fn run(&self, mut task: PlotterTask) {
-        let cpuid = CpuId::new();
+        #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+        let cpuid = CpuId::with_cpuid_fn(|eax, ecx| raw_cpuid::cpuid_count(eax, ecx));
+
+        #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
         let cpu_name = cpuid
             .get_processor_brand_string()
-            .and_then(|bs| Some(bs.as_str().trim().to_string()))
+            .map(|bs| bs.as_str().trim().to_string())
             .or_else(|| {
                 cpuid
                     .get_vendor_info()
                     .map(|vi| vi.as_str().to_string())
             })
-            .unwrap_or_else(|| "Unknown CPU".to_string());
-        
+            .unwrap_or("Unknown CPU".to_string());
+
+        #[cfg(not(any(target_arch = "x86", target_arch = "x86_64")))]
+        let cpu_name = "Unknown CPU".to_string();
+                
         let cores = sys_info::cpu_num().unwrap();
         let memory = sys_info::mem_info().unwrap();
 
