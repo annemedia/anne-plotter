@@ -3,8 +3,9 @@ extern crate cc;
 fn main() {
     let mut base = cc::Build::new();
 
-    // Only add MSVC flags if target_env is msvc (safe for GNU)
-    if cfg!(target_env = "msvc") {
+    // Only add MSVC optimization flags when the target is actually MSVC
+    // (GitHub Actions Windows uses GNU/MinGW, so skip them there)
+    if std::env::var("CARGO_CFG_TARGET_ENV").unwrap() == "msvc" {
         base.flag("/O2")
             .flag("/Oi")
             .flag("/Ot")
@@ -12,20 +13,21 @@ fn main() {
             .flag("/GT")
             .flag("/GL");
     } else {
-        base.flag("-std=c99").flag("-mtune=native");
+        base.flag("-std=c99")
+            .flag("-mtune=native");
     }
 
-    // Base shabal (always compiled)
+    // Base shabal (always)
     let mut config = base.clone();
     config.file("src/c/sph_shabal.c")
           .file("src/c/common.c")
           .compile("shabal");
 
-    // SIMD variants only on x86_64
-    if cfg!(target_arch = "x86_64") {
+    // SIMD variants only on x86_64 (skip on arm64 etc.)
+    if std::env::var("CARGO_CFG_TARGET_ARCH").unwrap() == "x86_64" {
         // SSE2
         let mut config = base.clone();
-        if !cfg!(target_env = "msvc") {
+        if std::env::var("CARGO_CFG_TARGET_ENV").unwrap() != "msvc" {
             config.flag("-msse2");
         }
         config.file("src/c/mshabal_128_sse2.c")
@@ -34,7 +36,7 @@ fn main() {
 
         // AVX2
         let mut config = base.clone();
-        if cfg!(target_env = "msvc") {
+        if std::env::var("CARGO_CFG_TARGET_ENV").unwrap() == "msvc" {
             config.flag("/arch:AVX2");
         } else {
             config.flag("-mavx2");
@@ -45,7 +47,7 @@ fn main() {
 
         // AVX
         let mut config = base.clone();
-        if cfg!(target_env = "msvc") {
+        if std::env::var("CARGO_CFG_TARGET_ENV").unwrap() == "msvc" {
             config.flag("/arch:AVX");
         } else {
             config.flag("-mavx");
@@ -56,7 +58,7 @@ fn main() {
 
         // AVX512
         let mut config = base.clone();
-        if cfg!(target_env = "msvc") {
+        if std::env::var("CARGO_CFG_TARGET_ENV").unwrap() == "msvc" {
             config.flag("/arch:AVX512");
         } else {
             config.flag("-mavx512f");
